@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
@@ -13,8 +14,8 @@ client = OpenAI(
 )
 
 st.set_page_config(page_title="AI Excel 分析助手", layout="wide")
-st.title("AI Excel 数据分析助手 (精简版)")
-st.write("上传 Excel，自动清洗数据并用本地 AI 生成分析总结。")
+st.title("AI Excel 数据分析助手")
+st.write("上传 Excel，自动清洗数据，并用本地 AI 生成分析总结。支持多轮追问。")
 
 # ---------- 数据清洗函数 ----------
 def clean_dataframe(df):
@@ -54,49 +55,6 @@ def clean_dataframe(df):
 
     return df, report
 
-# ---------- AI 总结函数 ----------
-def generate_summary(dataframe):
-    desc = dataframe.describe(include='all').to_string()
-    cols = list(dataframe.columns)
-    shape = dataframe.shape
-    na = dataframe.isna().sum().to_string()
-
-    prompt = f"""
-你是一位擅长向非技术用户解释数据的分析师。请根据以下数据信息，用**通俗易懂的中文**写一份数据分析总结，让一个完全不了解这个数据的人也能明白。
-
-数据基本信息:
-- 表格大小: {shape[0]} 行 × {shape[1]} 列
-- 列名: {cols}
-- 缺失值情况: {na}
-- 统计摘要: {desc}
-
-请按以下结构输出总结（用小标题分开）:
-
-1. 这个数据是关于什么的？
-   用一两句话说清楚这个表格记录了什么主题。
-
-2. 里面主要有哪些信息？
-   列出主要的指标类型和数据维度，不要罗列所有列名，而是归类说明。
-
-3.这个数据能用来干什么？
-   结合实际场景，说明这份数据可能被用来做什么分析或决策。
-
-4. 从这个数据里能看到什么？
-   基于统计摘要，指出 1-2 个值得注意的模式或现象。
-
-要求:
-- 语言通俗，避免太多专业术语。
-- 每条结论尽量说明"所以呢？对普通人意味着什么"。
-- 总字数控制在 400 字以内。
-"""
-    response = client.chat.completions.create(
-        model="qwen2.5:7b",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
-        max_tokens=800
-    )
-    return response.choices[0].message.content
-
 # ---------- 文件上传 ----------
 uploaded_file = st.file_uploader("选择 Excel 文件", type=["xlsx", "xls"])
 if uploaded_file:
@@ -117,7 +75,7 @@ if uploaded_file:
     df_raw = df_raw.dropna(how='all').reset_index(drop=True)
 
     # --- 侧边栏清洗开关 ---
-    st.sidebar.header("🔧 数据预处理")
+    st.sidebar.header("数据预处理")
     do_clean = st.sidebar.checkbox("启用自动数据清洗", value=False)
     if do_clean:
         df, report = clean_dataframe(df_raw.copy())
@@ -136,9 +94,68 @@ if uploaded_file:
     c2.metric("列数", df.shape[1])
     c3.metric("缺失值总数", df.isna().sum().sum())
 
-    # --- AI 总结按钮 ---
-    if st.button("生成 AI 分析总结"):
-        with st.spinner("本地 AI 正在分析数据，请稍候..."):
-            summary = generate_summary(df)
-            st.subheader("📝 AI 分析总结")
-            st.write(summary)
+    # ---------- 初始化对话历史 ----------
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    if "last_df_shape" not in st.session_state:
+        st.session_state.last_df_shape = None
+    if st.session_state.last_df_shape != df.shape:
+        st.session_state.messages = []
+        st.session_state.last_df_shape = df.shape
+
+    # ---------- 初次分析按钮 ----------
+    if len(st.session_state.messages) == 0:
+        if st.button("生成 AI 分析总结", type="primary"):
+            with st.spinner("本地 AI 正在分析数据，请稍候..."):
+                data_context = f"""你是一位擅长向非技术用户解释数据的分析师。
+当前分析的数据表格包含 {df.shape[0]} 行 × {df.shape[1]} 列。
+列名: {list(df.columns)}
+前几行数据预览:
+{df.head(3).to_string()}
+
+请用通俗中文总结：1.这数据是什么 2.主要信息 3.用途 4.一个值得注意的现象。
+总字数控制在 400 字以内。"""
+
+                st.session_state.messages = [
+                    {"role": "system", "content": data_context},
+                    {"role": "user", "content": "请帮我分析这份数据。"}
+                ]
+
+                response = client.chat.completions.create(
+                    model="qwen2.5:7b",
+                    messages=st.session_state.messages,
+                    temperature=0.5,
+                    max_tokens=600
+                )
+                reply = response.choices[0].message.content
+                st.session_state.messages.append({"role": "assistant", "content": reply})
+                st.rerun()
+
+    # ---------- 显示对话历史 ----------
+    for msg in st.session_state.messages:
+        if msg["role"] in ["user", "assistant"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    # ---------- 多轮对话输入框 ----------
+    if len(st.session_state.messages) > 0:
+        if prompt := st.chat_input("继续追问，例如：哪个季度数值最高？、这数据能用来做什么决策？"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+
+            with st.chat_message("assistant"):
+                with st.spinner("思考中..."):
+                    api_messages = [{"role": m["role"], "content": m["content"]}
+                                    for m in st.session_state.messages
+                                    if m["role"] in ["system", "user", "assistant"]]
+
+                    response = client.chat.completions.create(
+                        model="qwen2.5:7b",
+                        messages=api_messages,
+                        temperature=0.7
+                    )
+                    reply = response.choices[0].message.content
+                    st.markdown(reply)
+            st.session_state.messages.append({"role": "assistant", "content": reply})
