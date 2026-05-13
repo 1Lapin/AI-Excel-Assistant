@@ -23,8 +23,11 @@
 
 ##  项目结构
 ├── app.py            # Streamlit 主程序
+
 ├── requirements.txt  # 依赖列表
+
 ├── .env.example      # 环境变量模板
+
 └── README.md
 
 ## 效果展示
