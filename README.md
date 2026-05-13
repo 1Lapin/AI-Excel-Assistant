@@ -31,5 +31,5 @@
 └── README.md
 
 ## 效果展示
-<img width="1669" height="1145" alt="image" src="https://github.com/user-attachments/assets/29de3772-a354-4bfd-89e8-9612771aef2f" />
-<img width="1665" height="1298" alt="image" src="https://github.com/user-attachments/assets/d02cd69d-b9c6-4502-9ee3-8049adb1b1d8" />
+<img width="2403" height="864" alt="image" src="https://github.com/user-attachments/assets/0f07b463-1cb7-443c-8fcf-923609156ec3" />
+<img width="2451" height="1334" alt="image" src="https://github.com/user-attachments/assets/64365f95-93e0-4cb6-9757-0f6286f7c54f" />
